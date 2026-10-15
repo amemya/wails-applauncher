@@ -1,13 +1,16 @@
 # Client-specific ignores
 client/build/bin
-node_modules/
 client/frontend/dist/
 client/frontend/package.json.md5
 
 # Server-specific ignores
-# Ignore the compiled server binary
+server/build/bin
+server/frontend/dist/
+server/frontend/package.json.md5
 server/server
 server/wails-applauncher-client
 server/server-files/dist
 
+# General
+node_modules/
 .DS_Store
