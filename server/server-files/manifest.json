@@ -3,7 +3,7 @@
     "name": "Python Hello",
     "description": "A simple Python script that prints a greeting.",
     "artifact_type": "zip",
-    "build_command": "mkdir -p ./dist && zip -j ./dist/python_hello.zip ./hello.py",
+    "build_command": "mkdir -p ./dist \u0026\u0026 zip -j ./dist/python_hello.zip ./hello.py",
     "artifact_path": "dist/python_hello.zip",
     "run_command": "python3 hello.py"
   },
@@ -11,7 +11,7 @@
     "name": "Ruby Hello",
     "description": "A simple Ruby script that prints a greeting.",
     "artifact_type": "zip",
-    "build_command": "mkdir -p ./dist && zip -j ./dist/ruby_hello.zip ./hello.rb",
+    "build_command": "mkdir -p ./dist \u0026\u0026 zip -j ./dist/ruby_hello.zip ./hello.rb",
     "artifact_path": "dist/ruby_hello.zip",
     "run_command": "ruby hello.rb"
   },
@@ -19,7 +19,7 @@
     "name": "C Hello",
     "description": "A simple C program that prints a greeting. Requires gcc to be installed and in the system's PATH.",
     "artifact_type": "binary",
-    "build_command": "mkdir -p ./dist && gcc -o ./dist/c_hello ./hello.c",
+    "build_command": "mkdir -p ./dist \u0026\u0026 gcc -o ./dist/c_hello ./hello.c",
     "artifact_path": "dist/c_hello",
     "run_command": "c_hello"
   },
@@ -27,7 +27,7 @@
     "name": "Python Sum",
     "description": "A multi-file Python program that calculates the sum of two numbers.",
     "artifact_type": "zip",
-    "build_command": "mkdir -p ./dist && zip -j ./dist/python_sum.zip ./sum_program/main.py ./sum_program/calculator.py",
+    "build_command": "mkdir -p ./dist \u0026\u0026 zip -j ./dist/python_sum.zip ./sum_program/main.py ./sum_program/calculator.py",
     "artifact_path": "dist/python_sum.zip",
     "run_command": "python3 main.py"
   }
