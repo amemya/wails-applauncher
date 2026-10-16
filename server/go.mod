@@ -1,4 +1,4 @@
-module wails-applauncher-client
+module wails-applauncher-server
 
 go 1.23
 

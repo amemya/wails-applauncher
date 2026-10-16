@@ -1,0 +1,11 @@
+@import "@mantine/core/styles.css";
+@import "@mantine/notifications/styles.css";
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--mantine-color-dark-8);
+  color: var(--mantine-color-dark-0);
+  min-height: 100vh;
+}
