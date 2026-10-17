@@ -26,6 +26,8 @@ import {
   GetRawManifestJSON,
   SaveRawManifestJSON,
   GetManifest,
+  SelectAppsDirectory,
+  OpenAppsDirectory,
 } from "../wailsjs/go/main/App";
 import { EventsOn } from "../wailsjs/runtime/runtime";
 import { main } from "../wailsjs/go/models";
@@ -121,6 +123,38 @@ function App() {
     } catch (err: any) {
       notifications.show({
         title: "ポート変更エラー",
+        message: err.message || String(err),
+        color: "red",
+      });
+    }
+  };
+
+  const handleSelectAppsDir = async () => {
+    try {
+      const selected = await SelectAppsDirectory();
+      if (selected) {
+        await loadAllData();
+        notifications.show({
+          title: "作品ディレクトリを変更しました",
+          message: selected,
+          color: "teal",
+        });
+      }
+    } catch (err: any) {
+      notifications.show({
+        title: "ディレクトリ選択エラー",
+        message: err.message || String(err),
+        color: "red",
+      });
+    }
+  };
+
+  const handleOpenAppsDir = async () => {
+    try {
+      await OpenAppsDirectory();
+    } catch (err: any) {
+      notifications.show({
+        title: "フォルダを開けませんでした",
         message: err.message || String(err),
         color: "red",
       });
@@ -263,6 +297,42 @@ function App() {
           </Stack>
         </Card>
 
+        {/* Apps Directory Location Settings */}
+        <Card shadow="sm" radius="md" withBorder padding="md">
+          <Stack gap="xs">
+            <Group justify="space-between" align="center">
+              <Text fw={600} size="sm">
+                📁 配信作品ディレクトリ (配布フォルダ)
+              </Text>
+              <Group gap="xs">
+                <Button
+                  variant="light"
+                  size="xs"
+                  onClick={handleSelectAppsDir}
+                >
+                  📁 フォルダを変更
+                </Button>
+                <Button
+                  variant="default"
+                  size="xs"
+                  onClick={handleOpenAppsDir}
+                >
+                  📂 フォルダを開く
+                </Button>
+              </Group>
+            </Group>
+            <Text c="dimmed" size="xs">
+              USBメモリやデスクトップなど、任意の作品フォルダを指定できます。フォルダ内の <code>manifest.json</code> と成果物が自動で読み込まれます。
+            </Text>
+
+            <Paper bg="dark.7" p="xs" radius="xs" withBorder>
+              <Code fw={600} fz="xs" style={{ wordBreak: "break-all" }}>
+                {serverStatus?.apps_dir || "未設定"}
+              </Code>
+            </Paper>
+          </Stack>
+        </Card>
+
         {/* Applications List */}
         <Card shadow="sm" radius="md" withBorder padding="md">
           <Stack gap="sm">
@@ -282,7 +352,7 @@ function App() {
             {isJsonMode ? (
               <Stack gap="xs">
                 <Text c="dimmed" size="xs">
-                  <code>manifest.json</code> を直接編集して保存できます。
+                  選択中ディレクトリ内の <code>manifest.json</code> を直接編集して保存できます。
                 </Text>
                 <Textarea
                   value={rawJson}
@@ -305,6 +375,15 @@ function App() {
                   </Button>
                 </Group>
               </Stack>
+            ) : apps.length === 0 ? (
+              <Paper p="md" withBorder bg="dark.8" style={{ textAlign: "center" }}>
+                <Text c="dimmed" size="sm">
+                  このディレクトリにはまだ登録されたアプリケーションがありません。
+                </Text>
+                <Text c="dimmed" size="xs" mt="xs">
+                  「フォルダを開く」から作品ファイルを配置するか、「JSON直接編集」でアプリを登録してください。
+                </Text>
+              </Paper>
             ) : (
               <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
                 {apps.map((app, index) => (
@@ -321,9 +400,16 @@ function App() {
                           <Text fw={600} size="sm">
                             {app.name}
                           </Text>
-                          <Badge size="xs" variant="light" color="blue">
-                            {app.artifact_type}
-                          </Badge>
+                          <Group gap="4">
+                            {app.launch_type && (
+                              <Badge size="xs" variant="dot" color={app.launch_type === "gui" ? "violet" : "gray"}>
+                                {app.launch_type.toUpperCase()}
+                              </Badge>
+                            )}
+                            <Badge size="xs" variant="light" color="blue">
+                              {app.artifact_type}
+                            </Badge>
+                          </Group>
                         </Group>
                         <Text c="dimmed" size="xs" lineClamp={2}>
                           {app.description || "説明なし"}

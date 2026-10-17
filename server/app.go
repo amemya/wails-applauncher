@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
+	goruntime "runtime"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -20,6 +22,7 @@ type ServerStatus struct {
 	Port    string   `json:"port"`
 	IPs     []string `json:"ips"`
 	URLs    []string `json:"urls"`
+	AppsDir string   `json:"apps_dir"`
 }
 
 type LogMessage struct {
@@ -48,9 +51,14 @@ func (a *App) startup(ctx context.Context) {
 	cfg, err := loadConfig()
 	if err != nil {
 		runtime.LogErrorf(ctx, "Failed to load config: %v", err)
-		cfg = ServerConfig{Port: "8080"}
+		cfg = ServerConfig{Port: "8080", AppsDir: getDefaultAppsDir()}
 	}
 	a.config = cfg
+
+	// Set initial apps directory
+	if err := a.httpServer.SetAppsDir(cfg.AppsDir); err != nil {
+		runtime.LogErrorf(ctx, "Failed to set apps directory: %v", err)
+	}
 
 	// Automatically start HTTP server in background
 	if err := a.httpServer.Start(cfg.Port); err != nil {
@@ -66,7 +74,7 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 }
 
-// GetServerStatus returns network and server state for GUI
+// GetServerStatus returns network, apps dir and server state for GUI
 func (a *App) GetServerStatus() ServerStatus {
 	ips := GetLocalIPs()
 	var urls []string
@@ -84,22 +92,73 @@ func (a *App) GetServerStatus() ServerStatus {
 		Port:    port,
 		IPs:     ips,
 		URLs:    urls,
+		AppsDir: a.httpServer.GetAppsDir(),
 	}
 }
 
-// GetManifest returns parsed applications
-func (a *App) GetManifest() ([]AppItem, error) {
-	return loadManifest()
+// SelectAppsDirectory opens native directory picker and updates the apps directory
+func (a *App) SelectAppsDirectory() (string, error) {
+	selectedDir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		DefaultDirectory: a.httpServer.GetAppsDir(),
+		Title:            "配信する作品ディレクトリを選択",
+	})
+	if err != nil {
+		return "", err
+	}
+	if selectedDir == "" {
+		return a.httpServer.GetAppsDir(), nil // user cancelled
+	}
+
+	if err := a.SetAppsDirectory(selectedDir); err != nil {
+		return "", err
+	}
+	return selectedDir, nil
 }
 
-// SaveManifest saves applications list
+// SetAppsDirectory sets the apps directory and saves config
+func (a *App) SetAppsDirectory(dir string) error {
+	if err := a.httpServer.SetAppsDir(dir); err != nil {
+		return err
+	}
+	a.config.AppsDir = a.httpServer.GetAppsDir()
+	if err := saveConfig(a.config); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+	return nil
+}
+
+// OpenAppsDirectory opens the folder in OS file manager
+func (a *App) OpenAppsDirectory() error {
+	dir := a.httpServer.GetAppsDir()
+	var cmd *exec.Cmd
+
+	switch goruntime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", dir)
+	case "windows":
+		cmd = exec.Command("explorer", dir)
+	case "linux":
+		cmd = exec.Command("xdg-open", dir)
+	default:
+		return fmt.Errorf("unsupported OS: %s", goruntime.GOOS)
+	}
+
+	return cmd.Start()
+}
+
+// GetManifest returns parsed applications from the current apps directory
+func (a *App) GetManifest() ([]AppItem, error) {
+	return a.httpServer.LoadManifest()
+}
+
+// SaveManifest saves applications list into the current apps directory
 func (a *App) SaveManifest(apps []AppItem) error {
-	return saveManifest(apps)
+	return a.httpServer.SaveManifest(apps)
 }
 
 // GetRawManifestJSON returns manifest as formatted JSON string
 func (a *App) GetRawManifestJSON() (string, error) {
-	content, err := loadManifest()
+	content, err := a.httpServer.LoadManifest()
 	if err != nil {
 		return "", err
 	}
@@ -110,13 +169,13 @@ func (a *App) GetRawManifestJSON() (string, error) {
 	return string(bytes), nil
 }
 
-// SaveRawManifestJSON parses and saves JSON string
+// SaveRawManifestJSON parses and saves JSON string into current apps directory
 func (a *App) SaveRawManifestJSON(jsonStr string) error {
 	var apps []AppItem
 	if err := json.Unmarshal([]byte(jsonStr), &apps); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
-	return saveManifest(apps)
+	return a.httpServer.SaveManifest(apps)
 }
 
 // UpdatePort changes port and restarts HTTP server

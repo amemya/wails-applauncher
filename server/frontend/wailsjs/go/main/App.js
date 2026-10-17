@@ -14,12 +14,24 @@ export function GetServerStatus() {
   return window['go']['main']['App']['GetServerStatus']();
 }
 
+export function OpenAppsDirectory() {
+  return window['go']['main']['App']['OpenAppsDirectory']();
+}
+
 export function SaveManifest(arg1) {
   return window['go']['main']['App']['SaveManifest'](arg1);
 }
 
 export function SaveRawManifestJSON(arg1) {
   return window['go']['main']['App']['SaveRawManifestJSON'](arg1);
+}
+
+export function SelectAppsDirectory() {
+  return window['go']['main']['App']['SelectAppsDirectory']();
+}
+
+export function SetAppsDirectory(arg1) {
+  return window['go']['main']['App']['SetAppsDirectory'](arg1);
 }
 
 export function ToggleServer(arg1) {
