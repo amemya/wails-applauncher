@@ -9,20 +9,21 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 )
 
 type AppItem struct {
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	ArtifactType string `json:"artifact_type"`
-	BuildCommand string `json:"build_command"`
-	ArtifactPath string `json:"artifact_path"`
-	RunCommand   string `json:"run_command"`
-	LaunchType   string `json:"launch_type,omitempty"` // "gui" or "terminal"
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	SourcePath     string `json:"source_path,omitempty"`
+	ArtifactType   string `json:"artifact_type"`
+	BuildCommand   string `json:"build_command,omitempty"`
+	ArtifactPath   string `json:"artifact_path"`
+	RunCommand     string `json:"run_command"`
+	LaunchType     string `json:"launch_type,omitempty"` // "gui" or "terminal"
+	ArtifactExists bool   `json:"artifact_exists,omitempty"`
 }
 
 type ServerConfig struct {
@@ -167,6 +168,17 @@ func (s *HTTPServer) LoadManifest() ([]AppItem, error) {
 	if err := json.Unmarshal(content, &appList); err != nil {
 		return nil, fmt.Errorf("failed to parse manifest: %w", err)
 	}
+
+	appsDir := s.GetAppsDir()
+	for i := range appList {
+		artifactPath := filepath.Join(appsDir, appList[i].ArtifactPath)
+		if _, err := os.Stat(artifactPath); err == nil {
+			appList[i].ArtifactExists = true
+		} else {
+			appList[i].ArtifactExists = false
+		}
+	}
+
 	return appList, nil
 }
 
@@ -350,15 +362,13 @@ func (s *HTTPServer) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 	appsDir := s.GetAppsDir()
 	artifactAbsPath := filepath.Join(appsDir, targetApp.ArtifactPath)
 
-	// If artifact doesn't exist yet and BuildCommand is set, run build command
-	if _, err := os.Stat(artifactAbsPath); os.IsNotExist(err) && targetApp.BuildCommand != "" {
-		s.log("INFO", "Building '%s' on-demand: %s", targetApp.Name, targetApp.BuildCommand)
-		cmd := exec.Command("bash", "-c", targetApp.BuildCommand)
-		cmd.Dir = appsDir
-		output, err := cmd.CombinedOutput()
+	// If artifact doesn't exist yet, try to build it
+	if _, err := os.Stat(artifactAbsPath); os.IsNotExist(err) {
+		s.log("INFO", "Building '%s' on-demand...", targetApp.Name)
+		output, err := ExecuteBuild(appsDir, *targetApp)
 		if err != nil {
-			s.log("ERROR", "Build failed for '%s': %v\n%s", targetApp.Name, err, string(output))
-			http.Error(w, fmt.Sprintf("Build failed: %s", string(output)), http.StatusInternalServerError)
+			s.log("ERROR", "Build failed for '%s': %v\n%s", targetApp.Name, err, output)
+			http.Error(w, fmt.Sprintf("Build failed: %s", output), http.StatusInternalServerError)
 			return
 		}
 		s.log("INFO", "Build successful for '%s'", targetApp.Name)

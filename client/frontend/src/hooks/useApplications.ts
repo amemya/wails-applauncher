@@ -10,6 +10,7 @@ export interface Application {
   build_command: string;
   artifact_path: string;
   run_command: string;
+  launch_type?: string;
 }
 
 export function useApplications(serverAddress: string) {
@@ -54,12 +55,13 @@ export function useApplications(serverAddress: string) {
       const blob = await getArtifact(serverAddress, app.name);
       const fileData = new Uint8Array(await blob.arrayBuffer());
 
-      // 2. Pass data to client's Go backend to save and run
+      // 2. Pass data to client's Go backend to save and run directly (GUI) or in terminal
       setResultText(`Executing '${app.name}'...`);
       const output = await SaveAndRunArtifact(
         app.artifact_type === "zip",
-        Array.from(fileData), // Convert Uint8Array to a plain array for Wails
+        Array.from(fileData),
         app.run_command,
+        app.launch_type || "terminal",
       );
 
       // 3. Display result
