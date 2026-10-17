@@ -28,58 +28,91 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-// SaveAndRunArtifact saves the artifact, and then executes it in a new terminal window.
-func (a *App) SaveAndRunArtifact(isZip bool, fileData []byte, runCommand string) (string, error) {
+// SaveAndRunArtifact saves the artifact, and then executes it directly (GUI) or in a new terminal window.
+func (a *App) SaveAndRunArtifact(isZip bool, fileData []byte, runCommand string, launchType string) (string, error) {
 	tempDir, err := os.MkdirTemp("", "wails-app-")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp dir: %w", err)
 	}
-	// Not cleaning up tempDir so the user can see the files if needed.
+	// Not cleaning up tempDir immediately so application can run.
 
-	var commandToRunInTerminal string
+	var commandToRun string
 	var workingDir string
 
 	if isZip {
-		workingDir, commandToRunInTerminal, err = unzipArtifact(fileData, tempDir, runCommand)
+		workingDir, commandToRun, err = unzipArtifact(fileData, tempDir, runCommand)
 	} else {
-		workingDir = "" // For raw binaries, the command is the full path, so no specific working dir is needed.
-		commandToRunInTerminal, err = saveRawArtifact(fileData, tempDir, runCommand)
+		workingDir = tempDir
+		commandToRun, err = saveRawArtifact(fileData, tempDir, runCommand)
 	}
 	if err != nil {
-		return "", err // Handle errors from helpers
+		return "", err
 	}
 
+	isGUI := strings.ToLower(strings.TrimSpace(launchType)) == "gui"
+	if isGUI {
+		return a.launchDirectGUI(workingDir, commandToRun, runCommand)
+	}
+	return a.launchInTerminal(workingDir, commandToRun, runCommand)
+}
+
+// launchDirectGUI starts application directly without opening terminal window (ideal for games)
+func (a *App) launchDirectGUI(workingDir, commandToRun, runCommand string) (string, error) {
+	var cmd *exec.Cmd
+
+	switch runtime.GOOS {
+	case "darwin", "linux":
+		cmd = exec.Command("bash", "-c", commandToRun)
+		if workingDir != "" {
+			cmd.Dir = workingDir
+		}
+	case "windows":
+		cmd = exec.Command("cmd", "/C", "start", "", commandToRun)
+		if workingDir != "" {
+			cmd.Dir = workingDir
+		}
+	default:
+		return "", fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+
+	// Start asynchronously so the launcher does not block
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to launch GUI application: %w", err)
+	}
+
+	return fmt.Sprintf("Started '%s' (GUI Mode, PID %d)", runCommand, cmd.Process.Pid), nil
+}
+
+// launchInTerminal launches application inside an interactive terminal emulator
+func (a *App) launchInTerminal(workingDir, commandToRun, runCommand string) (string, error) {
 	var cmd *exec.Cmd
 
 	switch runtime.GOOS {
 	case "darwin":
 		var script string
 		if workingDir != "" {
-			script = fmt.Sprintf("cd '%s' && %s", workingDir, commandToRunInTerminal)
+			script = fmt.Sprintf("cd '%s' && %s", workingDir, commandToRun)
 		} else {
-			script = commandToRunInTerminal
+			script = commandToRun
 		}
-		// Safer way to build the AppleScript command to avoid escape sequence errors.
 		escapedScript := strings.ReplaceAll(script, `"`, `\\\"`)
 		appleScript := `tell application "Terminal" to do script "` + escapedScript + `"`
 		cmd = exec.Command("osascript", "-e", appleScript)
 
 	case "windows":
-		cmd = exec.Command("cmd", "/C", "start", "cmd.exe", "/K", commandToRunInTerminal)
+		cmd = exec.Command("cmd", "/C", "start", "cmd.exe", "/K", commandToRun)
 		if workingDir != "" {
 			cmd.Dir = workingDir
 		}
 
 	case "linux":
 		var script string
-		// Append '; exec bash' to keep the terminal open after the command finishes.
 		if workingDir != "" {
-			script = fmt.Sprintf("cd '%s' && %s; exec bash", workingDir, commandToRunInTerminal)
+			script = fmt.Sprintf("cd '%s' && %s; exec bash", workingDir, commandToRun)
 		} else {
-			script = fmt.Sprintf("%s; exec bash", commandToRunInTerminal)
+			script = fmt.Sprintf("%s; exec bash", commandToRun)
 		}
 		cmd = exec.Command("x-terminal-emulator", "-e", "bash", "-c", script)
-
 		if workingDir != "" {
 			cmd.Dir = workingDir
 		}
@@ -88,8 +121,7 @@ func (a *App) SaveAndRunArtifact(isZip bool, fileData []byte, runCommand string)
 		return "", fmt.Errorf("unsupported OS for terminal execution: %s", runtime.GOOS)
 	}
 
-	err = cmd.Run()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("failed to launch terminal: %w", err)
 	}
 
@@ -97,7 +129,6 @@ func (a *App) SaveAndRunArtifact(isZip bool, fileData []byte, runCommand string)
 }
 
 // unzipArtifact unpacks a zip archive into a temporary directory.
-// It returns the working directory, the command to run, and any error.
 func unzipArtifact(fileData []byte, tempDir, runCommand string) (string, string, error) {
 	zipReader, err := zip.NewReader(bytes.NewReader(fileData), int64(len(fileData)))
 	if err != nil {
@@ -122,20 +153,33 @@ func unzipArtifact(fileData []byte, tempDir, runCommand string) (string, string,
 		if _, err := io.Copy(targetFile, fileReader); err != nil {
 			return "", "", err
 		}
+		// Preserve executable permissions on extracted binaries
+		if file.Mode()&0111 != 0 {
+			os.Chmod(extractedFilePath, file.Mode())
+		}
 	}
 	return tempDir, runCommand, nil
 }
 
 // saveRawArtifact saves a raw binary file to a temporary directory.
-// It returns the full path to the executable and any error.
 func saveRawArtifact(fileData []byte, tempDir, runCommand string) (string, error) {
-	executablePath := filepath.Join(tempDir, runCommand)
-	if runtime.GOOS == "windows" {
-		executablePath += ".exe"
+	parts := strings.Fields(runCommand)
+	execName := "app"
+	if len(parts) > 0 {
+		execName = filepath.Base(parts[0])
 	}
+	if runtime.GOOS == "windows" && !strings.HasSuffix(execName, ".exe") {
+		execName += ".exe"
+	}
+
+	executablePath := filepath.Join(tempDir, execName)
 	err := os.WriteFile(executablePath, fileData, 0755)
 	if err != nil {
 		return "", fmt.Errorf("failed to write executable: %w", err)
 	}
-	return executablePath, nil
+
+	if len(parts) > 1 {
+		return fmt.Sprintf("./%s %s", execName, strings.Join(parts[1:], " ")), nil
+	}
+	return fmt.Sprintf("./%s", execName), nil
 }
