@@ -19,21 +19,37 @@ export function useApplications(serverAddress: string) {
     "Select an application to run, or view details",
   );
 
-  const fetchApplications = useCallback(() => {
-    if (!serverAddress) return;
-    getApplications(serverAddress)
-      .then((data) => {
-        setApplications(data);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch applications:", err);
-        notifications.show({
-          title: "Error",
-          message: `Could not fetch applications: ${err.message}`,
-          color: "red",
+  const [loading, setLoading] = useState<boolean>(false);
+
+  const fetchApplications = useCallback(
+    (notifySuccess = false) => {
+      if (!serverAddress) return;
+      setLoading(true);
+      getApplications(serverAddress)
+        .then((data) => {
+          setApplications(data);
+          if (notifySuccess) {
+            notifications.show({
+              title: "再取得完了",
+              message: `${data.length} 件のアプリケーションを取得しました`,
+              color: "teal",
+            });
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to fetch applications:", err);
+          notifications.show({
+            title: "取得エラー",
+            message: `アプリケーションを取得できませんでした: ${err.message}`,
+            color: "red",
+          });
+        })
+        .finally(() => {
+          setLoading(false);
         });
-      });
-  }, [serverAddress]);
+    },
+    [serverAddress],
+  );
 
   const handleShowDetails = (description: string) => {
     setResultText(description);
@@ -85,6 +101,7 @@ export function useApplications(serverAddress: string) {
   return {
     applications,
     resultText,
+    loading,
     fetchApplications,
     handleShowDetails,
     handleRunApplication,

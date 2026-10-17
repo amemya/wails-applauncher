@@ -19,9 +19,10 @@ function App() {
   const {
     applications,
     resultText,
+    loading,
     fetchApplications,
     handleShowDetails,
-    handleRunApplication, // Corrected name
+    handleRunApplication,
   } = useApplications(serverAddress);
 
   // Fetch applications whenever the address changes
@@ -36,11 +37,13 @@ function App() {
           Wails App Launcher
         </Title>
 
-        {/* Restored server address form */}
+        {/* Server address form with refresh button */}
         <ServerAddressForm
           newServerAddress={newServerAddress}
           setNewServerAddress={setNewServerAddress}
           handleSaveServerAddress={handleSaveServerAddress}
+          onRefresh={() => fetchApplications(true)}
+          loading={loading}
         />
 
         <ApplicationList
