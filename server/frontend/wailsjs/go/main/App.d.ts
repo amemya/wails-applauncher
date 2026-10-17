@@ -8,9 +8,15 @@ export function GetRawManifestJSON():Promise<string>;
 
 export function GetServerStatus():Promise<main.ServerStatus>;
 
+export function OpenAppsDirectory():Promise<void>;
+
 export function SaveManifest(arg1:Array<main.AppItem>):Promise<void>;
 
 export function SaveRawManifestJSON(arg1:string):Promise<void>;
+
+export function SelectAppsDirectory():Promise<string>;
+
+export function SetAppsDirectory(arg1:string):Promise<void>;
 
 export function ToggleServer(arg1:boolean):Promise<void>;
 

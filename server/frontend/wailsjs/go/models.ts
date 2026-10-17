@@ -7,6 +7,7 @@ export namespace main {
 	    build_command: string;
 	    artifact_path: string;
 	    run_command: string;
+	    launch_type?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppItem(source);
@@ -20,6 +21,7 @@ export namespace main {
 	        this.build_command = source["build_command"];
 	        this.artifact_path = source["artifact_path"];
 	        this.run_command = source["run_command"];
+	        this.launch_type = source["launch_type"];
 	    }
 	}
 	export class ServerStatus {
@@ -27,6 +29,7 @@ export namespace main {
 	    port: string;
 	    ips: string[];
 	    urls: string[];
+	    apps_dir: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ServerStatus(source);
@@ -38,6 +41,7 @@ export namespace main {
 	        this.port = source["port"];
 	        this.ips = source["ips"];
 	        this.urls = source["urls"];
+	        this.apps_dir = source["apps_dir"];
 	    }
 	}
 

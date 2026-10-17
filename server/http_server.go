@@ -22,45 +22,46 @@ type AppItem struct {
 	BuildCommand string `json:"build_command"`
 	ArtifactPath string `json:"artifact_path"`
 	RunCommand   string `json:"run_command"`
+	LaunchType   string `json:"launch_type,omitempty"` // "gui" or "terminal"
 }
 
 type ServerConfig struct {
-	Port string `json:"port"`
+	Port    string `json:"port"`
+	AppsDir string `json:"apps_dir"`
 }
 
 const (
-	serverFilesDir = "./server-files"
-	manifestPath   = serverFilesDir + "/manifest.json"
-	configPath     = serverFilesDir + "/server.config.json"
+	defaultPort = "8080"
 )
 
-type HTTPServer struct {
-	server *http.Server
-	port   string
-	mu     sync.RWMutex
-	onLog  func(level string, message string)
+func getConfigPath() string {
+	// Look for server.config.json in current directory or legacy server-files
+	if _, err := os.Stat("server.config.json"); err == nil {
+		return "server.config.json"
+	}
+	if _, err := os.Stat("server-files/server.config.json"); err == nil {
+		return "server-files/server.config.json"
+	}
+	return "server.config.json"
 }
 
-func NewHTTPServer(onLog func(level string, message string)) *HTTPServer {
-	return &HTTPServer{
-		onLog: onLog,
+func getDefaultAppsDir() string {
+	// Prefer ./server-files if exists, otherwise default to ./server-files
+	abs, err := filepath.Abs("./server-files")
+	if err == nil {
+		return abs
 	}
-}
-
-func (s *HTTPServer) log(level, format string, v ...interface{}) {
-	msg := fmt.Sprintf(format, v...)
-	log.Printf("[%s] %s", level, msg)
-	if s.onLog != nil {
-		s.onLog(level, msg)
-	}
+	return "./server-files"
 }
 
 func loadConfig() (ServerConfig, error) {
 	var cfg ServerConfig
-	content, err := os.ReadFile(configPath)
+	path := getConfigPath()
+	content, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			cfg.Port = "8080"
+			cfg.Port = defaultPort
+			cfg.AppsDir = getDefaultAppsDir()
 			if err := saveConfig(cfg); err != nil {
 				return cfg, fmt.Errorf("failed to create default config file: %w", err)
 			}
@@ -72,30 +73,105 @@ func loadConfig() (ServerConfig, error) {
 	if err := json.Unmarshal(content, &cfg); err != nil {
 		return cfg, fmt.Errorf("failed to parse config file: %w", err)
 	}
+
+	if cfg.Port == "" {
+		cfg.Port = defaultPort
+	}
+	if cfg.AppsDir == "" {
+		cfg.AppsDir = getDefaultAppsDir()
+	}
+
+	// Ensure absolute path
+	if abs, err := filepath.Abs(cfg.AppsDir); err == nil {
+		cfg.AppsDir = abs
+	}
+
 	return cfg, nil
 }
 
 func saveConfig(cfg ServerConfig) error {
+	path := getConfigPath()
 	content, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to serialize config data: %w", err)
 	}
-	return os.WriteFile(configPath, content, 0644)
+	return os.WriteFile(path, content, 0644)
 }
 
-func loadManifest() ([]AppItem, error) {
+type HTTPServer struct {
+	server  *http.Server
+	port    string
+	appsDir string
+	mu      sync.RWMutex
+	onLog   func(level string, message string)
+}
+
+func NewHTTPServer(onLog func(level string, message string)) *HTTPServer {
+	return &HTTPServer{
+		onLog:   onLog,
+		appsDir: getDefaultAppsDir(),
+	}
+}
+
+func (s *HTTPServer) log(level, format string, v ...interface{}) {
+	msg := fmt.Sprintf(format, v...)
+	log.Printf("[%s] %s", level, msg)
+	if s.onLog != nil {
+		s.onLog(level, msg)
+	}
+}
+
+func (s *HTTPServer) GetAppsDir() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.appsDir
+}
+
+func (s *HTTPServer) SetAppsDir(dir string) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+
+	if err := os.MkdirAll(abs, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", abs, err)
+	}
+
+	s.mu.Lock()
+	s.appsDir = abs
+	s.mu.Unlock()
+
+	// Ensure manifest.json exists in the new apps directory
+	manifestPath := filepath.Join(abs, "manifest.json")
+	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+		emptyList := []AppItem{}
+		bytes, _ := json.MarshalIndent(emptyList, "", "  ")
+		_ = os.WriteFile(manifestPath, bytes, 0644)
+		s.log("INFO", "Initialized new manifest.json at %s", manifestPath)
+	}
+
+	s.log("INFO", "Apps directory set to: %s", abs)
+	return nil
+}
+
+func (s *HTTPServer) LoadManifest() ([]AppItem, error) {
+	manifestPath := filepath.Join(s.GetAppsDir(), "manifest.json")
 	var appList []AppItem
 	content, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read manifest file at %s: %w", manifestPath, err)
+		if os.IsNotExist(err) {
+			return []AppItem{}, nil
+		}
+		return nil, fmt.Errorf("failed to read manifest at %s: %w", manifestPath, err)
 	}
 	if err := json.Unmarshal(content, &appList); err != nil {
-		return nil, fmt.Errorf("failed to parse manifest file: %w", err)
+		return nil, fmt.Errorf("failed to parse manifest: %w", err)
 	}
 	return appList, nil
 }
 
-func saveManifest(apps []AppItem) error {
+func (s *HTTPServer) SaveManifest(apps []AppItem) error {
+	manifestPath := filepath.Join(s.GetAppsDir(), "manifest.json")
 	content, err := json.MarshalIndent(apps, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to serialize manifest data: %w", err)
@@ -122,7 +198,7 @@ func (s *HTTPServer) Start(port string) error {
 	})
 
 	mux.HandleFunc("/api/v1/applications", func(w http.ResponseWriter, r *http.Request) {
-		appList, err := loadManifest()
+		appList, err := s.LoadManifest()
 		if err != nil {
 			s.log("ERROR", "Failed to load manifest: %v", err)
 			http.Error(w, "Failed to load applications", http.StatusInternalServerError)
@@ -145,6 +221,7 @@ func (s *HTTPServer) Start(port string) error {
 	mux.HandleFunc("/api/admin/manifest", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
+			manifestPath := filepath.Join(s.GetAppsDir(), "manifest.json")
 			content, err := os.ReadFile(manifestPath)
 			if err != nil {
 				http.Error(w, "Failed to read manifest file", http.StatusInternalServerError)
@@ -158,7 +235,7 @@ func (s *HTTPServer) Start(port string) error {
 				http.Error(w, "Invalid JSON format", http.StatusBadRequest)
 				return
 			}
-			if err := saveManifest(updatedAppList); err != nil {
+			if err := s.SaveManifest(updatedAppList); err != nil {
 				http.Error(w, "Failed to write manifest file", http.StatusInternalServerError)
 				return
 			}
@@ -190,7 +267,7 @@ func (s *HTTPServer) Start(port string) error {
 				http.Error(w, "Failed to save config", http.StatusInternalServerError)
 				return
 			}
-			s.log("INFO", "Server config updated to port %s", newConfig.Port)
+			s.log("INFO", "Server config updated: Port=%s, AppsDir=%s", newConfig.Port, newConfig.AppsDir)
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprintln(w, "Config updated successfully")
 		default:
@@ -210,7 +287,7 @@ func (s *HTTPServer) Start(port string) error {
 	}
 
 	go func() {
-		s.log("INFO", "Distribution HTTP server started on :%s", port)
+		s.log("INFO", "Distribution HTTP server started on :%s (Apps Dir: %s)", port, s.GetAppsDir())
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			s.log("ERROR", "HTTP server error: %v", err)
 		}
@@ -252,7 +329,7 @@ func (s *HTTPServer) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	appList, err := loadManifest()
+	appList, err := s.LoadManifest()
 	if err != nil {
 		http.Error(w, "Failed to load manifest", http.StatusInternalServerError)
 		return
@@ -270,12 +347,14 @@ func (s *HTTPServer) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For backwards compatibility, if BuildCommand is set and artifact doesn't exist yet, build it
-	artifactAbsPath := filepath.Join(serverFilesDir, targetApp.ArtifactPath)
+	appsDir := s.GetAppsDir()
+	artifactAbsPath := filepath.Join(appsDir, targetApp.ArtifactPath)
+
+	// If artifact doesn't exist yet and BuildCommand is set, run build command
 	if _, err := os.Stat(artifactAbsPath); os.IsNotExist(err) && targetApp.BuildCommand != "" {
 		s.log("INFO", "Building '%s' on-demand: %s", targetApp.Name, targetApp.BuildCommand)
 		cmd := exec.Command("bash", "-c", targetApp.BuildCommand)
-		cmd.Dir = serverFilesDir
+		cmd.Dir = appsDir
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			s.log("ERROR", "Build failed for '%s': %v\n%s", targetApp.Name, err, string(output))
@@ -283,6 +362,12 @@ func (s *HTTPServer) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.log("INFO", "Build successful for '%s'", targetApp.Name)
+	}
+
+	if _, err := os.Stat(artifactAbsPath); os.IsNotExist(err) {
+		s.log("ERROR", "Artifact file not found: %s", artifactAbsPath)
+		http.Error(w, "Artifact file not found", http.StatusNotFound)
+		return
 	}
 
 	fileName := filepath.Base(artifactAbsPath)
